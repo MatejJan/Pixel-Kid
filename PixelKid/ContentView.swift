@@ -1,89 +1,76 @@
 import SwiftUI
 
-struct ContentView: View {
-    @StateObject private var camera = CameraController()
-    @StateObject private var light = ScreenLight()
+enum Role: String {
+    case camera, viewer
+}
 
-    @State private var peekSeconds: Double = 3
-    @State private var peekCountdown = 5
-    @State private var peekUsesLight = true
-    @State private var countdownRemaining: Int?
-    @State private var isPeeking = false
-    @State private var peekResult: PeekResult?
+struct ContentView: View {
+    @AppStorage("role") private var role: Role?
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                preview
-                controls
-            }
-
-            if let countdownRemaining {
-                Text("\(countdownRemaining)")
-                    .font(.system(size: 160, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.black.opacity(0.7))
-            }
-
-            if light.isShown {
-                ZStack {
-                    Color.black
-                    light.color.opacity(light.opacity)
-                }
-                .ignoresSafeArea()
-                .onTapGesture {
-                    if !isPeeking { Task { await light.fadeOut() } }
-                }
+        Group {
+            switch role {
+            case .camera:
+                CameraRoot { role = nil }
+            case .viewer:
+                ViewerView { role = nil }
+            case nil:
+                RolePicker(role: $role)
             }
         }
-        .statusBarHidden(light.isShown)
-        .persistentSystemOverlays(light.isShown ? .hidden : .automatic)
-        .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = true
-            camera.start()
-        }
-        .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
-            camera.stop()
-        }
-        .sheet(item: $peekResult) { result in
-            PeekResultView(result: result)
-        }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
     }
+}
 
-    // MARK: - Preview
+private struct CameraRoot: View {
+    @StateObject private var station = CameraStation()
+    let onChangeRole: () -> Void
 
-    private var preview: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black
-            if let image = camera.previewImage {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if camera.cameraUnavailable {
-                Text("Camera unavailable")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            statsOverlay
-
-            if let progress = camera.stackProgress {
-                ProgressView(value: progress)
-                    .tint(.white)
-                    .padding()
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 380)
+    var body: some View {
+        CameraView(station: station, onChangeRole: onChangeRole)
+            .onAppear { station.start() }
+            .onDisappear { station.stop() }
     }
+}
 
-    private var statsOverlay: some View {
-        let stats = camera.stats
-        return VStack(alignment: .leading, spacing: 2) {
+private struct RolePicker: View {
+    @Binding var role: Role?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Pixel Kid")
+                .font(.largeTitle.bold())
+            Text("What is this phone for?")
+                .foregroundStyle(.secondary)
+
+            Button {
+                role = .camera
+            } label: {
+                Label("Camera in the nursery", systemImage: "video")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button {
+                role = .viewer
+            } label: {
+                Label("Viewer", systemImage: "eye")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .controlSize(.large)
+        .padding(32)
+    }
+}
+
+// MARK: - Shared views
+
+struct StatsOverlay: View {
+    let stats: FrameStats
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text("ISO \(Int(stats.iso))  ·  \(formatShutter(stats.exposureDuration))  ·  \(stats.fps, specifier: "%.1f") fps")
             Text("Brightness \(stats.brightness * 100, specifier: "%.2f")%  ·  Light index \(stats.lightIndex, specifier: "%.2f")")
         }
@@ -93,102 +80,21 @@ struct ContentView: View {
         .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
         .padding(8)
     }
+}
 
-    // MARK: - Controls
+struct LightControls: View {
+    @Binding var settings: LightSettings
 
-    private var controls: some View {
-        Form {
-            Section("Camera") {
-                Picker("Camera", selection: $camera.position) {
-                    Text("Back").tag(CameraController.Position.back)
-                    Text("Front").tag(CameraController.Position.front)
-                }
-                .pickerStyle(.segmented)
-
-                Toggle("Manual exposure", isOn: $camera.manualExposure)
-
-                if camera.manualExposure {
-                    LabeledSlider(title: "ISO", value: Binding(
-                        get: { Double(camera.iso) },
-                        set: { camera.iso = Float($0) }
-                    ), range: Double(camera.isoRange.lowerBound)...Double(camera.isoRange.upperBound), label: "\(Int(camera.iso))")
-
-                    LabeledSlider(title: "Shutter", value: Binding(
-                        get: { log(camera.exposureDuration) },
-                        set: { camera.exposureDuration = exp($0) }
-                    ), range: log(camera.exposureRange.lowerBound)...log(camera.exposureRange.upperBound), label: formatShutter(camera.exposureDuration))
-                }
-            }
-
-            Section("Processing") {
-                LabeledSlider(title: "Gain", value: $camera.gainEV, range: 0...5, label: String(format: "+%.1f EV", camera.gainEV))
-                Stepper("Live averaging: \(camera.liveAveraging == 1 ? "off" : "\(camera.liveAveraging) frames")", value: $camera.liveAveraging, in: 1...16)
-                Toggle("Noise reduction", isOn: $camera.noiseReduction)
-            }
-
-            Section("Screen light") {
-                Picker("Color", selection: $light.tint) {
-                    ForEach(ScreenLight.Tint.allCases) { tint in
-                        Text(tint.rawValue.capitalized).tag(tint)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                LabeledSlider(title: "Screen", value: $light.screenBrightness, range: 0...1, label: "\(Int(light.screenBrightness * 100))%")
-                LabeledSlider(title: "Color level", value: $light.level, range: 0.02...1, label: "\(Int(light.level * 100))%")
-                LabeledSlider(title: "Fade", value: $light.fadeSeconds, range: 0...5, label: String(format: "%.1f s", light.fadeSeconds))
-
-                Button("Turn light on (tap screen to turn off)") {
-                    Task { await light.fadeIn() }
-                }
-            }
-
-            Section {
-                LabeledSlider(title: "Stack", value: $peekSeconds, range: 1...10, label: String(format: "%.0f s", peekSeconds))
-                Stepper("Countdown: \(peekCountdown) s", value: $peekCountdown, in: 0...15)
-                Toggle("Use screen light", isOn: $peekUsesLight)
-
-                Button {
-                    Task { await runPeek() }
-                } label: {
-                    Text("Peek")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isPeeking || camera.cameraUnavailable)
-            } header: {
-                Text("Peek")
-            } footer: {
-                Text("Averages every frame captured during the stack time into one still. Keep the phone still while it runs.")
+    var body: some View {
+        Picker("Color", selection: $settings.tint) {
+            ForEach(ScreenLight.Tint.allCases) { tint in
+                Text(tint.rawValue.capitalized).tag(tint)
             }
         }
-    }
+        .pickerStyle(.segmented)
 
-    // MARK: - Peek
-
-    private func runPeek() async {
-        isPeeking = true
-        defer { isPeeking = false }
-
-        for remaining in stride(from: peekCountdown, to: 0, by: -1) {
-            countdownRemaining = remaining
-            try? await Task.sleep(for: .seconds(1))
-        }
-        countdownRemaining = nil
-
-        if peekUsesLight {
-            await light.fadeIn()
-            // Give auto exposure a moment to adjust to the new light.
-            if !camera.manualExposure { try? await Task.sleep(for: .seconds(1)) }
-        }
-
-        let result = await camera.captureStack(seconds: peekSeconds)
-
-        if peekUsesLight { await light.fadeOut() }
-
-        UINotificationFeedbackGenerator().notificationOccurred(result == nil ? .error : .success)
-        peekResult = result
+        LabeledSlider(title: "Screen", value: $settings.screenBrightness, range: 0...1, label: "\(Int(settings.screenBrightness * 100))%")
+        LabeledSlider(title: "Color level", value: $settings.level, range: 0.02...1, label: "\(Int(settings.level * 100))%")
     }
 }
 

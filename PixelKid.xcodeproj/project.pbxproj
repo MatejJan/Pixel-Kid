@@ -10,9 +10,22 @@
 		5C1D00000000000000000002 /* PixelKid.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PixelKid.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5C1D00000000000000000010 /* Exceptions for "PixelKid" folder in "PixelKid" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5C1D00000000000000000006 /* PixelKid */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5C1D00000000000000000003 /* PixelKid */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5C1D00000000000000000010 /* Exceptions for "PixelKid" folder in "PixelKid" target */,
+			);
 			path = PixelKid;
 			sourceTree = "<group>";
 		};
@@ -226,8 +239,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PixelKid/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Pixel Kid";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pixel Kid uses the camera to watch over your baby.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Pixel Kid connects the camera phone and viewers on your local network.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pixel Kid saves peek images to your photo library so you can compare them.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -254,8 +269,10 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PixelKid/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Pixel Kid";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pixel Kid uses the camera to watch over your baby.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Pixel Kid connects the camera phone and viewers on your local network.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pixel Kid saves peek images to your photo library so you can compare them.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

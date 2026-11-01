@@ -3,7 +3,7 @@ import CoreImage
 import UIKit
 
 /// Measurements of the most recent frame, shown over the preview.
-struct FrameStats {
+struct FrameStats: Codable {
     var iso: Float = 0
     var exposureDuration: Double = 0
     var fps: Double = 0
@@ -29,7 +29,13 @@ struct PeekResult: Identifiable {
     let seconds: Double
     let iso: Float
     let exposureDuration: Double
+
+    var info: PeekInfo {
+        PeekInfo(frameCount: frameCount, seconds: seconds, iso: iso, exposureDuration: exposureDuration)
+    }
 }
+
+private let defaults = UserDefaults.standard
 
 /// State is split between the main thread (published values), sessionQueue (device setup) and videoQueue (frames).
 final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
@@ -46,13 +52,14 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     @Published private(set) var stackProgress: Double?
 
     @Published var position: Position = .back { didSet { if position != oldValue { configureSession() } } }
-    @Published var manualExposure = false { didSet { applyExposure() } }
-    @Published var iso: Float = 800 { didSet { applyExposure() } }
-    @Published var exposureDuration: Double = 1.0 / 15 { didSet { applyExposure() } }
+    // Settings are remembered across launches, so a restarted camera keeps its tuning.
+    @Published var manualExposure = defaults.bool(forKey: "manualExposure") { didSet { defaults.set(manualExposure, forKey: "manualExposure"); applyExposure() } }
+    @Published var iso: Float = defaults.object(forKey: "iso") as? Float ?? 800 { didSet { defaults.set(iso, forKey: "iso"); applyExposure() } }
+    @Published var exposureDuration: Double = defaults.object(forKey: "exposureDuration") as? Double ?? 1.0 / 15 { didSet { defaults.set(exposureDuration, forKey: "exposureDuration"); applyExposure() } }
 
-    @Published var gainEV: Double = 0 { didSet { updateProcessing() } }
-    @Published var liveAveraging: Int = 1 { didSet { updateProcessing() } }
-    @Published var noiseReduction = false { didSet { updateProcessing() } }
+    @Published var gainEV: Double = defaults.double(forKey: "gainEV") { didSet { defaults.set(gainEV, forKey: "gainEV"); updateProcessing() } }
+    @Published var liveAveraging: Int = max(defaults.integer(forKey: "liveAveraging"), 1) { didSet { defaults.set(liveAveraging, forKey: "liveAveraging"); updateProcessing() } }
+    @Published var noiseReduction = defaults.bool(forKey: "noiseReduction") { didSet { defaults.set(noiseReduction, forKey: "noiseReduction"); updateProcessing() } }
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "PixelKid.session")
@@ -68,10 +75,18 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
     private var lastFrameTime: CMTime?
     private var smoothedFPS: Double = 0
     private var stackJob: StackJob?
+    private var streamSink: ((Data) -> Void)?
+    private var streamInterval: Double = 0.5
+    private var lastStreamTime: CMTime?
 
     private static let previewWidth: CGFloat = 720
 
     // MARK: - Lifecycle
+
+    override init() {
+        super.init()
+        updateProcessing()
+    }
 
     func start() {
         AVCaptureDevice.requestAccess(for: .video) { granted in
@@ -226,6 +241,16 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         videoQueue.async { self.processing = settings }
     }
 
+    // MARK: - Streaming
+
+    /// Sends JPEGs of the live view to `sink` (on the video queue), or stops when `sink` is nil.
+    func setStream(fps: Double, sink: ((Data) -> Void)?) {
+        videoQueue.async {
+            self.streamInterval = 1 / fps
+            self.streamSink = sink
+        }
+    }
+
     // MARK: - Peek
 
     /// Averages all frames captured over the given time into one still image.
@@ -294,6 +319,13 @@ final class CameraController: NSObject, ObservableObject, AVCaptureVideoDataOutp
         let scale = Self.previewWidth / image.extent.width
         let preview = process(image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)), with: processing)
         let cgImage = context.createCGImage(preview, from: preview.extent)
+
+        if let streamSink, lastStreamTime.map({ (time - $0).seconds >= streamInterval }) ?? true,
+           let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+           let jpeg = context.jpegRepresentation(of: preview, colorSpace: colorSpace, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.6]) {
+            lastStreamTime = time
+            streamSink(jpeg)
+        }
 
         if let lastFrameTime {
             let delta = (time - lastFrameTime).seconds
